@@ -38,6 +38,10 @@ const commands = [
         .setDescription('Посмотреть свой баланс рыбок'),
     
     new SlashCommandBuilder()
+        .setName('top')
+        .setDescription('Посмотреть топ-10 самых успешных рыбаков'),
+    
+    new SlashCommandBuilder()
         .setName('add_fish')
         .setDescription('Начислить рыбки участнику (для модераторов)')
         .addUserOption(option => 
@@ -77,6 +81,30 @@ client.on(Events.InteractionCreate, async (interaction) => {
             content: `🎣 Твой текущий баланс: **${userBalance} рыбок**. Участвуй в турнирах и приглашай друзей, чтобы заработать больше!`,
             ephemeral: true
         });
+    }
+
+    if (interaction.commandName === 'top') {
+        const sorted = Object.entries(balances)
+            .sort(([, a], [, b]) => b - a)
+            .slice(0, 10);
+
+        if (sorted.length === 0) {
+            return interaction.reply({ content: '🎣 Список лидеров пока пуст!', ephemeral: true });
+        }
+
+        const medals = ['🥇', '🥈', '🥉'];
+        const leaderboardText = sorted.map(([id, amount], index) => {
+            const prefix = medals[index] || `**#${index + 1}**`;
+            return `${prefix} <@${id}> — **${amount}** рыбок`;
+        }).join('\n');
+
+        const embed = new EmbedBuilder()
+            .setTitle('🏆 Таблица лидеров «Рыбного Хозяйства»')
+            .setColor(0xF1C40F)
+            .setDescription(leaderboardText)
+            .setTimestamp();
+
+        await interaction.reply({ embeds: [embed] });
     }
 
     if (interaction.commandName === 'add_fish') {
