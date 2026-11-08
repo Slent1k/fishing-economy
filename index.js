@@ -49,13 +49,22 @@ const commands = [
         .addIntegerOption(option => 
             option.setName('amount').setDescription('Количество рыбок').setRequired(true))
         .addStringOption(option => 
-            option.setName('reason').setDescription('Причина (турнир, приглашение и т.д.)').setRequired(true))
+            option.setName('reason').setDescription('Причина (сдал квест, турнир и т.д.)').setRequired(true)),
+
+    new SlashCommandBuilder()
+        .setName('remove_fish')
+        .setDescription('Забрать рыбки у участника (для модераторов)')
+        .addUserOption(option => 
+            option.setName('user').setDescription('У кого забираем').setRequired(true))
+        .addIntegerOption(option => 
+            option.setName('amount').setDescription('Количество рыбок').setRequired(true))
+        .addStringOption(option => 
+            option.setName('reason').setDescription('Причина (штраф, нарушение и т.д.)').setRequired(true))
 ].map(command => command.toJSON());
 
 client.once(Events.ClientReady, async (c) => {
     console.log(`Economy bot started as ${c.user.tag}`);
 
-    // Автоматическая регистрация слеш-команд
     const rest = new REST({ version: '10' }).setToken(TOKEN);
     try {
         console.log('Регистрация слеш-команд...');
@@ -75,14 +84,16 @@ client.on(Events.InteractionCreate, async (interaction) => {
     const balances = loadBalances();
     const userId = interaction.user.id;
 
+    // Команда /balance
     if (interaction.commandName === 'balance') {
         const userBalance = balances[userId] || 0;
         await interaction.reply({
-            content: `🎣 Твой текущий баланс: **${userBalance} рыбок**. Участвуй в турнирах и приглашай друзей, чтобы заработать больше!`,
+            content: `🎣 Твой текущий баланс: **${userBalance} рыбок**. Участвуй в турнирах и выполняй квесты, чтобы заработать больше!`,
             ephemeral: true
         });
     }
 
+    // Команда /top
     if (interaction.commandName === 'top') {
         const sorted = Object.entries(balances)
             .sort(([, a], [, b]) => b - a)
@@ -107,6 +118,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
         await interaction.reply({ embeds: [embed] });
     }
 
+    // Команда /add_fish
     if (interaction.commandName === 'add_fish') {
         if (!interaction.member.permissions.has('ManageRoles')) {
             return interaction.reply({ content: '❌ У тебя нет прав на выдачу рыбок!', ephemeral: true });
@@ -116,12 +128,30 @@ client.on(Events.InteractionCreate, async (interaction) => {
         const amount = interaction.options.getInteger('amount');
         const reason = interaction.options.getString('reason');
 
-        if (!balances[targetUser.id]) {
-            balances[targetUser.id] = 0;
-        }
+        if (!balances[targetUser.id]) balances[targetUser.id] = 0;
         balances[targetUser.id] += amount;
         saveBalances(balances);
 
+        // Отправка ЛС пользователю
+        let dmStatus = ' (сообщение в ЛС отправлено)';
+        try {
+            const dmEmbed = new EmbedBuilder()
+                .setTitle('🎣 Вам начислены рыбки!')
+                .setColor(0x2ECC71)
+                .addFields(
+                    { name: 'Количество', value: `+${amount} рыбок`, inline: true },
+                    { name: 'Причина', value: `${reason}`, inline: true },
+                    { name: 'Новый баланс', value: `${balances[targetUser.id]} рыбок`, inline: true },
+                    { name: 'Выдал', value: `${interaction.user.tag}` }
+                )
+                .setTimestamp();
+
+            await targetUser.send({ embeds: [dmEmbed] });
+        } catch (err) {
+            dmStatus = ' (не удалось отправить ЛС — у пользователя закрыт личный чат)';
+        }
+
+        // Ответ в канал
         const embed = new EmbedBuilder()
             .setTitle('🎣 Начисление рыбок')
             .setColor(0x00AE86)
@@ -131,6 +161,56 @@ client.on(Events.InteractionCreate, async (interaction) => {
                 { name: 'Баланс', value: `${balances[targetUser.id]} рыбок`, inline: true },
                 { name: 'Причина / Модератор', value: `${reason} (выдал: ${interaction.user})` }
             )
+            .setFooter({ text: `Статус ЛС: ${dmStatus}` })
+            .setTimestamp();
+
+        await interaction.reply({ embeds: [embed] });
+    }
+
+    // Команда /remove_fish
+    if (interaction.commandName === 'remove_fish') {
+        if (!interaction.member.permissions.has('ManageRoles')) {
+            return interaction.reply({ content: '❌ У тебя нет прав на списание рыбок!', ephemeral: true });
+        }
+
+        const targetUser = interaction.options.getUser('user');
+        const amount = interaction.options.getInteger('amount');
+        const reason = interaction.options.getString('reason');
+
+        if (!balances[targetUser.id]) balances[targetUser.id] = 0;
+        balances[targetUser.id] = Math.max(0, balances[targetUser.id] - amount);
+        saveBalances(balances);
+
+        // Отправка ЛС пользователю
+        let dmStatus = ' (сообщение в ЛС отправлено)';
+        try {
+            const dmEmbed = new EmbedBuilder()
+                .setTitle('⚠️ У вас списаны рыбки')
+                .setColor(0xE74C3C)
+                .addFields(
+                    { name: 'Количество', value: `-${amount} рыбок`, inline: true },
+                    { name: 'Причина', value: `${reason}`, inline: true },
+                    { name: 'Новый баланс', value: `${balances[targetUser.id]} рыбок`, inline: true },
+                    { name: 'Списал', value: `${interaction.user.tag}` }
+                )
+                .setTimestamp();
+
+            await targetUser.send({ embeds: [dmEmbed] });
+        } catch (err) {
+            dmStatus = ' (не удалось отправить ЛС — у пользователя закрыт личный чат)';
+        }
+
+        // Ответ в канал
+        const embed = new EmbedBuilder()
+            .setTitle('🗑️ Списание рыбок')
+            .setColor(0xE74C3C)
+            .addFields(
+                { name: 'Пользователь', value: `${targetUser}`, inline: true },
+                { name: 'Списано', value: `-${amount} рыбок`, inline: true },
+                { name: 'Баланс', value: `${balances[targetUser.id]} рыбок`, inline: true },
+                { name: 'Причина / Модератор', value: `${reason} (снял: ${interaction.user})` }
+            )
+            .setFooter({ text: `Статус ЛС: ${dmStatus}` })
             .setTimestamp();
 
         await interaction.reply({ embeds: [embed] });
